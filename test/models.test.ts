@@ -147,6 +147,36 @@ test('toPiModels incorporates builtin models matching /login behavior', () => {
   assert.equal(mimo.name, 'MiMo-V2.6-Flash Free')
 })
 
+test('free ids resolve to their native builtin so thinking metadata survives', () => {
+  // `deepseek-v4.1-flash-free` has no builtin entry of its own: without the
+  // native-id fallback it lost the model's thinkingLevelMap, so pi treated
+  // "off" as supported and sent no reasoning parameter at all.
+  const models = toPiModels(['deepseek-v4.1-flash-free', 'muse-spark-1.2-contributor-free', 'ghost-model-free'], new Map())
+
+  const deepseek = models.find((m) => m.id === 'deepseek-v4.1-flash-free')!
+  assert.equal(deepseek.api, 'openai-completions')
+  assert.deepEqual(deepseek.thinkingLevelMap, {
+    off: null,
+    minimal: null,
+    low: 'low',
+    medium: null,
+    high: 'high',
+    xhigh: null,
+    max: 'max',
+  })
+
+  // `-contributor-free` strips in two steps down to the native `muse-spark-1.2`.
+  const muse = models.find((m) => m.id === 'muse-spark-1.2-contributor-free')!
+  assert.equal(muse.api, 'openai-responses')
+  assert.equal(muse.thinkingLevelMap?.off, null)
+  assert.equal(muse.thinkingLevelMap?.minimal, 'minimal')
+
+  // No native entry: the generic fallback stays (no thinking map, chat api).
+  const ghost = models.find((m) => m.id === 'ghost-model-free')!
+  assert.equal(ghost.api, 'openai-completions')
+  assert.equal(ghost.thinkingLevelMap, undefined)
+})
+
 test('toPiClassifiers serves the builtin Zen classifier on this provider', () => {
   const classifiers = toPiClassifiers(['jev-1.13-free', 'big-pickle', 'mystery-free'])
   assert.equal(classifiers.length, 1, 'only ids the builtin catalog declares as classifiers survive')

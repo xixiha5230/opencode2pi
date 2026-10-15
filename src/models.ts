@@ -105,6 +105,35 @@ function builtinClassifier(id: string): ClassifierModel<ClassifierApi> | undefin
 }
 
 /**
+ * Lane suffixes the free lane appends to a native model id. pi-ai's builtin
+ * catalog only carries the native ids, so a free id has to be reduced to the
+ * native one before the builtin lookup can find it (e.g.
+ * `deepseek-v4.1-flash-free` -> `deepseek-v4.1-flash`,
+ * `muse-spark-1.2-contributor-free` -> `muse-spark-1.2`).
+ */
+const NATIVE_ID_SUFFIXES = ['-contributor-free', '-free', '-contributor']
+
+/**
+ * The builtin opencode chat model behind a lane id: the exact id if the
+ * builtin catalog names it, otherwise the native id the lane suffixed. The
+ * native entry is what carries the per-model thinking metadata
+ * (`thinkingLevelMap` — which levels exist and which values they map to — and
+ * the protocol `compat`), so a free id without its own entry would otherwise
+ * fall back to a generic chat model and lose the ability to control thinking.
+ */
+function builtinModel(id: string): Model<Api> | undefined {
+  const get = getBuiltinModel as (provider: string, modelId: string) => Model<Api> | undefined
+  const exact = get('opencode', id)
+  if (exact) return exact
+  for (const suffix of NATIVE_ID_SUFFIXES) {
+    if (!id.endsWith(suffix)) continue
+    const native = get('opencode', id.slice(0, -suffix.length))
+    if (native) return native
+  }
+  return undefined
+}
+
+/**
  * Build the classifier models: the builtin Zen classifier entries (they carry
  * the System One api, the builtin's retired `/zen/v1` base URL — the System One
  * lane was unreachable upstream on both hosts, so it is not re-homed — and
@@ -123,7 +152,9 @@ export function toPiClassifiers(ids: string[]): Array<ClassifierModel<Classifier
  * Build the pi model list for the picker: ids already decided free by the
  * catalog. Limits and modalities prefer the capability catalog (the same
  * source that declares the protocol) and fall back to models.dev, then to the
- * builtin pi model, then to a conservative default.
+ * builtin pi model, then to a conservative default. The builtin lookup also
+ * resolves a free id to its native entry (see builtinModel), which is how a
+ * lane id keeps its per-model thinking metadata.
  */
 export function toPiModels(
   ids: string[],
@@ -134,7 +165,7 @@ export function toPiModels(
   // Classifier ids are not chat models: they only speak System One, so they
   // belong to toPiClassifiers and must never reach the chat list.
   return ids.filter((id) => builtinClassifier(id) === undefined).map((id) => {
-    const builtin = (getBuiltinModel as (provider: string, modelId: string) => Model<Api> | undefined)('opencode', id)
+    const builtin = builtinModel(id)
     const m = meta.get(id)
     const caps = capabilityMeta.get(id)
     const contextWindow = caps?.contextWindow ?? m?.contextWindow
@@ -144,6 +175,10 @@ export function toPiModels(
     if (builtin) {
       return {
         ...builtin,
+        // The lane id, not the builtin's native one: pi registers and routes
+        // by the id the catalog exposed, and a resolved native entry would
+        // otherwise rename the free model to its native id.
+        id,
         provider: PROVIDER_ID,
         // pi's builtin opencode entries still pin the retired /zen host, which
         // now answers 403 for the anonymous lane: re-home them to the live one.
