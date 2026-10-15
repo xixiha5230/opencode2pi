@@ -114,6 +114,28 @@ function builtinClassifier(id: string): ClassifierModel<ClassifierApi> | undefin
 const NATIVE_ID_SUFFIXES = ['-contributor-free', '-free', '-contributor']
 
 /**
+ * Models whose `off` level the builtin catalog marks unsupported (or omits)
+ * but whose Zen endpoint actually honours a disable request.
+ *
+ * The value is the wire value for `off` in the model's thinking format;
+ * `'none'` makes pi-ai send `reasoning_effort: 'none'`. Verified by probing the
+ * anonymous lane directly: only ids whose probe answered 200 with zero
+ * reasoning output belong here. An endpoint that ignores the field would keep
+ * thinking while pi claims "off"; one that rejects it (a 400) would fail every
+ * off request and hide the model through the runtime cooldown. Both were seen
+ * on this lane (`cat-jam-free`, `space-bunny-free`, `step-5-preview-free`, the
+ * responses-native `muse-spark-*` answer 400; `longcat-2.5-preview-free`
+ * ignores it), so the set stays explicit rather than "null off works".
+ */
+const THINKING_OFF_OVERRIDES: Record<string, string> = {
+  'big-pickle': 'none',
+  'deepseek-v4.1-flash-free': 'none',
+  'mimo-v2.6-flash-free': 'none',
+  'nemotron-3-ultra-free': 'none',
+  'nemotron-3.5-lightning-free': 'none',
+}
+
+/**
  * The builtin opencode chat model behind a lane id: the exact id if the
  * builtin catalog names it, otherwise the native id the lane suffixed. The
  * native entry is what carries the per-model thinking metadata
@@ -172,6 +194,7 @@ export function toPiModels(
     const maxTokens = caps?.maxTokens ?? m?.maxTokens
     const reasoning = caps?.reasoning ?? m?.reasoning ?? false
     const image = caps?.image ?? m?.image ?? false
+    const thinkingOff = THINKING_OFF_OVERRIDES[id]
     if (builtin) {
       return {
         ...builtin,
@@ -183,6 +206,7 @@ export function toPiModels(
         // pi's builtin opencode entries still pin the retired /zen host, which
         // now answers 403 for the anonymous lane: re-home them to the live one.
         baseUrl: hostFor(builtin.api),
+        ...(thinkingOff ? { thinkingLevelMap: { ...builtin.thinkingLevelMap, off: thinkingOff } } : {}),
         ...(m?.name ? { name: m.name } : {}),
         ...(contextWindow ? { contextWindow } : {}),
         ...(maxTokens ? { maxTokens } : {}),

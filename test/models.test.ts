@@ -155,8 +155,10 @@ test('free ids resolve to their native builtin so thinking metadata survives', (
 
   const deepseek = models.find((m) => m.id === 'deepseek-v4.1-flash-free')!
   assert.equal(deepseek.api, 'openai-completions')
+  // native thinkingLevelMap resolved, then its unsupported `off` upgraded to
+  // the verified disable value (see THINKING_OFF_OVERRIDES).
   assert.deepEqual(deepseek.thinkingLevelMap, {
-    off: null,
+    off: 'none',
     minimal: null,
     low: 'low',
     medium: null,
@@ -175,6 +177,23 @@ test('free ids resolve to their native builtin so thinking metadata survives', (
   const ghost = models.find((m) => m.id === 'ghost-model-free')!
   assert.equal(ghost.api, 'openai-completions')
   assert.equal(ghost.thinkingLevelMap, undefined)
+})
+
+test('thinking off is enabled only for models whose lane accepts a disable', () => {
+  // Verified by probing the anonymous lane: these answer 200 with zero
+  // reasoning output for `reasoning_effort: 'none'`.
+  const models = toPiModels(
+    ['big-pickle', 'deepseek-v4.1-flash-free', 'mimo-v2.6-flash-free', 'nemotron-3-ultra-free', 'nemotron-3.5-lightning-free'],
+    new Map(),
+  )
+  for (const model of models) {
+    assert.equal(model.thinkingLevelMap?.off, 'none', `${model.id} should advertise an off level`)
+  }
+
+  // `space-bunny-free` answers 400 to a disable request: its builtin map must
+  // be left intact (off null) so pi never sends one.
+  const space = toPiModels(['space-bunny-free'], new Map())[0]!
+  assert.equal(space.thinkingLevelMap?.off, null)
 })
 
 test('toPiClassifiers serves the builtin Zen classifier on this provider', () => {
